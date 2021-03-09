@@ -11,6 +11,7 @@ Build-Depends:
  kmod,
  libelf-dev,
  libssl-dev,
+ openssl,
 Homepage: http://www.kernel.org/
 
 Package: linux-image-4.16.18-rt12
