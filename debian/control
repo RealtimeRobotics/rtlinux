@@ -4,8 +4,10 @@ Priority: optional
 Maintainer: Neil Roza <neil@rtr.ai>
 Build-Depends:
  bc,
+ bison,
  cpio,
  debhelper (>= 10),
+ flex,
  kmod,
  libelf-dev,
  libssl-dev,
