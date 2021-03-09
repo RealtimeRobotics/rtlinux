@@ -1,3 +1,11 @@
+linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu2) bionic; urgency=medium
+
+  * add debian/patches
+  * ed debian/control: Build-Depends: +bison, +flex
+  * ed debian/control: Build-Depends: +openssl
+
+ -- Neil Roza <neil@rtr.ai>  Tue, 09 Mar 2021 23:50:35 +0000
+
 linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu1) bionic; urgency=medium
 
   * add debian/gbp.conf
