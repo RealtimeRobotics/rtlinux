@@ -99,49 +99,66 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: fixdep [-e] <depfile> <target> <cmdline>\n");
-	fprintf(stderr, " -e  insert extra dependencies given on stdin\n");
+	fprintf(stderr, "Usage: fixdep <depfile> <target> <cmdline>\n");
 	exit(1);
+}
+
+/*
+ * In the intended usage of this program, the stdout is redirected to .*.cmd
+ * files. The return value of printf() and putchar() must be checked to catch
+ * any error, e.g. "No space left on device".
+ */
+static void xprintf(const char *format, ...)
+{
+	va_list ap;
+	int ret;
+
+	va_start(ap, format);
+	ret = vprintf(format, ap);
+	if (ret < 0) {
+		perror("fixdep");
+		exit(1);
+	}
+	va_end(ap);
+}
+
+static void xputchar(int c)
+{
+	int ret;
+
+	ret = putchar(c);
+	if (ret == EOF) {
+		perror("fixdep");
+		exit(1);
+	}
 }
 
 /*
  * Print out a dependency path from a symbol name
  */
-static void print_config(const char *m, int slen)
+static void print_dep(const char *m, int slen, const char *dir)
 {
-	int c, i;
+	int c, prev_c = '/', i;
 
-	printf("    $(wildcard include/config/");
+	xprintf("    $(wildcard %s/", dir);
 	for (i = 0; i < slen; i++) {
 		c = m[i];
 		if (c == '_')
 			c = '/';
 		else
 			c = tolower(c);
-		putchar(c);
+		if (c != '/' || prev_c != '/')
+			xputchar(c);
+		prev_c = c;
 	}
-	printf(".h) \\\n");
-}
-
-static void do_extra_deps(void)
-{
-	char buf[80];
-
-	while (fgets(buf, sizeof(buf), stdin)) {
-		int len = strlen(buf);
-
-		if (len < 2 || buf[len - 1] != '\n') {
-			fprintf(stderr, "fixdep: bad data on stdin\n");
-			exit(1);
-		}
-		print_config(buf, len - 1);
-	}
+	xprintf(".h) \\\n");
 }
 
 struct item {
@@ -208,7 +225,7 @@ static void use_config(const char *m, int slen)
 	    return;
 
 	define_config(m, slen, hash);
-	print_config(m, slen);
+	print_dep(m, slen, "include/config");
 }
 
 /* test if s ends in sub */
@@ -291,7 +308,7 @@ static int is_ignored_file(const char *s, int len)
  * assignments are parsed not only by make, but also by the rather simple
  * parser in scripts/mod/sumversion.c.
  */
-static void parse_dep_file(char *m, const char *target, int insert_extra_deps)
+static void parse_dep_file(char *m, const char *target)
 {
 	char *p;
 	int is_last, is_target;
@@ -338,13 +355,13 @@ static void parse_dep_file(char *m, const char *target, int insert_extra_deps)
 				 */
 				if (!saw_any_target) {
 					saw_any_target = 1;
-					printf("source_%s := %s\n\n",
-					       target, m);
-					printf("deps_%s := \\\n", target);
+					xprintf("source_%s := %s\n\n",
+						target, m);
+					xprintf("deps_%s := \\\n", target);
 				}
 				is_first_dep = 0;
 			} else {
-				printf("  %s \\\n", m);
+				xprintf("  %s \\\n", m);
 			}
 
 			buf = read_file(m);
@@ -367,33 +384,26 @@ static void parse_dep_file(char *m, const char *target, int insert_extra_deps)
 		exit(1);
 	}
 
-	if (insert_extra_deps)
-		do_extra_deps();
-
-	printf("\n%s: $(deps_%s)\n\n", target, target);
-	printf("$(deps_%s):\n", target);
+	xprintf("\n%s: $(deps_%s)\n\n", target, target);
+	xprintf("$(deps_%s):\n", target);
 }
 
 int main(int argc, char *argv[])
 {
 	const char *depfile, *target, *cmdline;
-	int insert_extra_deps = 0;
 	void *buf;
 
-	if (argc == 5 && !strcmp(argv[1], "-e")) {
-		insert_extra_deps = 1;
-		argv++;
-	} else if (argc != 4)
+	if (argc != 4)
 		usage();
 
 	depfile = argv[1];
 	target = argv[2];
 	cmdline = argv[3];
 
-	printf("cmd_%s := %s\n\n", target, cmdline);
+	xprintf("cmd_%s := %s\n\n", target, cmdline);
 
 	buf = read_file(depfile);
-	parse_dep_file(buf, target, insert_extra_deps);
+	parse_dep_file(buf, target);
 	free(buf);
 
 	return 0;

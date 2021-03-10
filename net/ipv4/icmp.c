@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	NET3:	Implementation of the ICMP protocol layer.
  *
  *		Alan Cox, <alan@lxorguk.ukuu.org.uk>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  *
  *	Some of the function names and the icmp unreach table for this
  *	module were derived from [icmp.c 1.0.11 06/02/93] by
@@ -59,7 +55,6 @@
  *
  *	- Should use skb_pull() instead of all the manual checking.
  *	  This would also greatly simply some upper layer error handlers. --AK
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -77,7 +72,6 @@
 #include <linux/string.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/slab.h>
-#include <linux/locallock.h>
 #include <net/snmp.h>
 #include <net/ip.h>
 #include <net/route.h>
@@ -205,11 +199,9 @@ static const struct icmp_control icmp_pointers[NR_ICMP_TYPES+1];
  *
  *	On SMP we have one ICMP socket per-cpu.
  */
-static DEFINE_LOCAL_IRQ_LOCK(icmp_sk_lock);
-
 static struct sock *icmp_sk(struct net *net)
 {
-	return *this_cpu_ptr(net->ipv4.icmp_sk);
+	return this_cpu_read(*net->ipv4.icmp_sk);
 }
 
 /* Called with BH disabled */
@@ -217,16 +209,12 @@ static inline struct sock *icmp_xmit_lock(struct net *net)
 {
 	struct sock *sk;
 
-	if (!local_trylock(icmp_sk_lock))
-		return NULL;
-
 	sk = icmp_sk(net);
 
 	if (unlikely(!spin_trylock(&sk->sk_lock.slock))) {
 		/* This can happen if the output path signals a
 		 * dst_link_failure() for an outgoing ICMP packet.
 		 */
-		local_unlock(icmp_sk_lock);
 		return NULL;
 	}
 	return sk;
@@ -235,7 +223,6 @@ static inline struct sock *icmp_xmit_lock(struct net *net)
 static inline void icmp_xmit_unlock(struct sock *sk)
 {
 	spin_unlock(&sk->sk_lock.slock);
-	local_unlock(icmp_sk_lock);
 }
 
 int sysctl_icmp_msgs_per_sec __read_mostly = 1000;
@@ -252,7 +239,7 @@ static struct {
 /**
  * icmp_global_allow - Are we allowed to send one more ICMP message ?
  *
- * Uses a token bucket to limit our ICMP messages to sysctl_icmp_msgs_per_sec.
+ * Uses a token bucket to limit our ICMP messages to ~sysctl_icmp_msgs_per_sec.
  * Returns false if we reached the limit and can not send another packet.
  * Note: called with BH disabled
  */
@@ -262,10 +249,11 @@ bool icmp_global_allow(void)
 	bool rc = false;
 
 	/* Check if token bucket is empty and cannot be refilled
-	 * without taking the spinlock.
+	 * without taking the spinlock. The READ_ONCE() are paired
+	 * with the following WRITE_ONCE() in this same function.
 	 */
-	if (!icmp_global.credit) {
-		delta = min_t(u32, now - icmp_global.stamp, HZ);
+	if (!READ_ONCE(icmp_global.credit)) {
+		delta = min_t(u32, now - READ_ONCE(icmp_global.stamp), HZ);
 		if (delta < HZ / 50)
 			return false;
 	}
@@ -275,14 +263,17 @@ bool icmp_global_allow(void)
 	if (delta >= HZ / 50) {
 		incr = sysctl_icmp_msgs_per_sec * delta / HZ ;
 		if (incr)
-			icmp_global.stamp = now;
+			WRITE_ONCE(icmp_global.stamp, now);
 	}
 	credit = min_t(u32, icmp_global.credit + incr, sysctl_icmp_msgs_burst);
 	if (credit) {
-		credit--;
+		/* We want to use a credit of one in average, but need to randomize
+		 * it for security reasons.
+		 */
+		credit = max_t(int, credit - prandom_u32_max(3), 0);
 		rc = true;
 	}
-	icmp_global.credit = credit;
+	WRITE_ONCE(icmp_global.credit, credit);
 	spin_unlock(&icmp_global.lock);
 	return rc;
 }
@@ -437,14 +428,11 @@ static void icmp_reply(struct icmp_bxm *icmp_param, struct sk_buff *skb)
 
 	icmp_param->data.icmph.checksum = 0;
 
+	ipcm_init(&ipc);
 	inet->tos = ip_hdr(skb)->tos;
-	sk->sk_mark = mark;
+	ipc.sockc.mark = mark;
 	daddr = ipc.addr = ip_hdr(skb)->saddr;
 	saddr = fib_compute_spec_dst(skb);
-	ipc.opt = NULL;
-	ipc.tx_flags = 0;
-	ipc.ttl = 0;
-	ipc.tos = -1;
 
 	if (icmp_param->replyopts.opt.opt.optlen) {
 		ipc.opt = &icmp_param->replyopts.opt;
@@ -581,7 +569,8 @@ relookup_failed:
  *			MUST reply to only the first fragment.
  */
 
-void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
+void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
+		 const struct ip_options *opt)
 {
 	struct iphdr *iph;
 	int room;
@@ -597,7 +586,13 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
 
 	if (!rt)
 		goto out;
-	net = dev_net(rt->dst.dev);
+
+	if (rt->dst.dev)
+		net = dev_net(rt->dst.dev);
+	else if (skb_in->dev)
+		net = dev_net(skb_in->dev);
+	else
+		goto out;
 
 	/*
 	 *	Find the original header. It is expected to be valid, of course.
@@ -702,7 +697,7 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
 					  iph->tos;
 	mark = IP4_REPLY_MARK(net, skb_in->mark);
 
-	if (ip_options_echo(net, &icmp_param.replyopts.opt.opt, skb_in))
+	if (__ip_options_echo(net, &icmp_param.replyopts.opt.opt, skb_in, opt))
 		goto out_unlock;
 
 
@@ -717,12 +712,10 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
 	icmp_param.skb	  = skb_in;
 	icmp_param.offset = skb_network_offset(skb_in);
 	inet_sk(sk)->tos = tos;
-	sk->sk_mark = mark;
+	ipcm_init(&ipc);
 	ipc.addr = iph->saddr;
 	ipc.opt = &icmp_param.replyopts.opt;
-	ipc.tx_flags = 0;
-	ipc.ttl = 0;
-	ipc.tos = -1;
+	ipc.sockc.mark = mark;
 
 	rt = icmp_route_lookup(net, &fl4, skb_in, iph, saddr, tos, mark,
 			       type, code, &icmp_param);
@@ -755,7 +748,7 @@ out_bh_enable:
 	local_bh_enable();
 out:;
 }
-EXPORT_SYMBOL(icmp_send);
+EXPORT_SYMBOL(__icmp_send);
 
 
 static void icmp_socket_deliver(struct sk_buff *skb, u32 info)
@@ -919,7 +912,7 @@ static bool icmp_redirect(struct sk_buff *skb)
 		return false;
 	}
 
-	icmp_socket_deliver(skb, icmp_hdr(skb)->un.gateway);
+	icmp_socket_deliver(skb, ntohl(icmp_hdr(skb)->un.gateway));
 	return true;
 }
 
@@ -1092,7 +1085,7 @@ error:
 	goto drop;
 }
 
-void icmp_err(struct sk_buff *skb, u32 info)
+int icmp_err(struct sk_buff *skb, u32 info)
 {
 	struct iphdr *iph = (struct iphdr *)skb->data;
 	int offset = iph->ihl<<2;
@@ -1107,13 +1100,15 @@ void icmp_err(struct sk_buff *skb, u32 info)
 	 */
 	if (icmph->type != ICMP_ECHOREPLY) {
 		ping_err(skb, offset, info);
-		return;
+		return 0;
 	}
 
 	if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED)
-		ipv4_update_pmtu(skb, net, info, 0, 0, IPPROTO_ICMP, 0);
+		ipv4_update_pmtu(skb, net, info, 0, IPPROTO_ICMP);
 	else if (type == ICMP_REDIRECT)
-		ipv4_redirect(skb, net, 0, 0, IPPROTO_ICMP, 0);
+		ipv4_redirect(skb, net, 0, IPPROTO_ICMP);
+
+	return 0;
 }
 
 /*
@@ -1256,9 +1251,7 @@ static int __net_init icmp_sk_init(struct net *net)
 	return 0;
 
 fail:
-	for_each_possible_cpu(i)
-		inet_ctl_sock_destroy(*per_cpu_ptr(net->ipv4.icmp_sk, i));
-	free_percpu(net->ipv4.icmp_sk);
+	icmp_sk_exit(net);
 	return err;
 }
 

@@ -1,36 +1,35 @@
-Source: linux-4.16.18-rt12
+Source: linux-5.4.84-rt47
 Section: kernel
 Priority: optional
 Maintainer: Neil Roza <neil@rtr.ai>
-Build-Depends:
- bc,
- bison,
- cpio,
- debhelper (>= 10),
- flex,
- kmod,
- libelf-dev,
- libssl-dev,
- openssl,
+Build-Depends: bc, rsync, kmod, cpio, bison, flex | flex:native , , libssl-dev:native
 Homepage: http://www.kernel.org/
 
-Package: linux-image-4.16.18-rt12
-Architecture: any
-Description: Linux kernel, version 4.16.18-rt12
+Package: linux-image-5.4.84-rt47
+Architecture: amd64
+Description: Linux kernel, version 5.4.84-rt47
  This package contains the Linux kernel, modules and corresponding other
- files, version: 4.16.18-rt12.
+ files, version: 5.4.84-rt47.
 
-Package: linux-headers-4.16.18-rt12
-Architecture: any
-Description: Linux kernel headers for 4.16.18-rt12 on ${kernel:debarch}
- This package provides kernel header files for 4.16.18-rt12 on ${kernel:debarch}
+Package: linux-headers-5.4.84-rt47
+Architecture: amd64
+Description: Linux kernel headers for 5.4.84-rt47 on amd64
+ This package provides kernel header files for 5.4.84-rt47 on amd64
  .
  This is useful for people who need to build external modules
 
 Package: linux-libc-dev
 Section: devel
 Provides: linux-kernel-headers
-Architecture: any
+Architecture: amd64
 Description: Linux support headers for userspace development
  This package provides userspaces headers from the Linux kernel.  These headers
  are used by the installed headers for GNU glibc and other system libraries.
+Multi-Arch: same
+
+Package: linux-image-5.4.84-rt47-dbg
+Section: debug
+Architecture: amd64
+Description: Linux kernel debugging symbols for 5.4.84-rt47
+ This package will come in handy if you need to debug the kernel. It provides
+ all the necessary debug symbols for the kernel and its modules.

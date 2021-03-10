@@ -332,13 +332,18 @@ static int qat_uclo_create_batch_init_list(struct icp_qat_fw_loader_handle
 	}
 	return 0;
 out_err:
+	/* Do not free the list head unless we allocated it. */
+	tail_old = tail_old->next;
+	if (flag) {
+		kfree(*init_tab_base);
+		*init_tab_base = NULL;
+	}
+
 	while (tail_old) {
 		mem_init = tail_old->next;
 		kfree(tail_old);
 		tail_old = mem_init;
 	}
-	if (flag)
-		kfree(*init_tab_base);
 	return -ENOMEM;
 }
 
@@ -1162,8 +1167,9 @@ static int qat_uclo_map_suof(struct icp_qat_fw_loader_handle *handle,
 	suof_handle->img_table.num_simgs = suof_ptr->num_chunks - 1;
 
 	if (suof_handle->img_table.num_simgs != 0) {
-		suof_img_hdr = kzalloc(suof_handle->img_table.num_simgs *
-				       sizeof(img_header), GFP_KERNEL);
+		suof_img_hdr = kcalloc(suof_handle->img_table.num_simgs,
+				       sizeof(img_header),
+				       GFP_KERNEL);
 		if (!suof_img_hdr)
 			return -ENOMEM;
 		suof_handle->img_table.simg_hdr = suof_img_hdr;

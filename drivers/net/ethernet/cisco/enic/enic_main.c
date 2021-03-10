@@ -119,7 +119,7 @@ static void enic_init_affinity_hint(struct enic *enic)
 
 	for (i = 0; i < enic->intr_count; i++) {
 		if (enic_is_err_intr(enic, i) || enic_is_notify_intr(enic, i) ||
-		    (enic->msix[i].affinity_mask &&
+		    (cpumask_available(enic->msix[i].affinity_mask) &&
 		     !cpumask_empty(enic->msix[i].affinity_mask)))
 			continue;
 		if (zalloc_cpumask_var(&enic->msix[i].affinity_mask,
@@ -148,7 +148,7 @@ static void enic_set_affinity_hint(struct enic *enic)
 	for (i = 0; i < enic->intr_count; i++) {
 		if (enic_is_err_intr(enic, i)		||
 		    enic_is_notify_intr(enic, i)	||
-		    !enic->msix[i].affinity_mask	||
+		    !cpumask_available(enic->msix[i].affinity_mask) ||
 		    cpumask_empty(enic->msix[i].affinity_mask))
 			continue;
 		err = irq_set_affinity_hint(enic->msix_entry[i].vector,
@@ -161,7 +161,7 @@ static void enic_set_affinity_hint(struct enic *enic)
 	for (i = 0; i < enic->wq_count; i++) {
 		int wq_intr = enic_msix_wq_intr(enic, i);
 
-		if (enic->msix[wq_intr].affinity_mask &&
+		if (cpumask_available(enic->msix[wq_intr].affinity_mask) &&
 		    !cpumask_empty(enic->msix[wq_intr].affinity_mask))
 			netif_set_xps_queue(enic->netdev,
 					    enic->msix[wq_intr].affinity_mask,
@@ -191,8 +191,16 @@ static void enic_udp_tunnel_add(struct net_device *netdev,
 		goto error;
 	}
 
-	if (ti->sa_family != AF_INET) {
-		netdev_info(netdev, "vxlan: only IPv4 offload supported");
+	switch (ti->sa_family) {
+	case AF_INET6:
+		if (!(enic->vxlan.flags & ENIC_VXLAN_OUTER_IPV6)) {
+			netdev_info(netdev, "vxlan: only IPv4 offload supported");
+			goto error;
+		}
+		/* Fall through */
+	case AF_INET:
+		break;
+	default:
 		goto error;
 	}
 
@@ -202,6 +210,11 @@ static void enic_udp_tunnel_add(struct net_device *netdev,
 		else
 			netdev_info(netdev, "vxlan: offload supported for only one UDP port");
 
+		goto error;
+	}
+	if ((vnic_dev_get_res_count(enic->vdev, RES_TYPE_WQ) != 1) &&
+	    !(enic->vxlan.flags & ENIC_VXLAN_MULTI_WQ)) {
+		netdev_info(netdev, "vxlan: vxlan offload with multi wq not supported on this adapter");
 		goto error;
 	}
 
@@ -238,9 +251,8 @@ static void enic_udp_tunnel_del(struct net_device *netdev,
 
 	spin_lock_bh(&enic->devcmd_lock);
 
-	if ((ti->sa_family != AF_INET) ||
-	    ((ntohs(ti->port) != enic->vxlan.vxlan_udp_port_number)) ||
-	    (ti->type != UDP_TUNNEL_TYPE_VXLAN)) {
+	if ((ntohs(ti->port) != enic->vxlan.vxlan_udp_port_number) ||
+	    ti->type != UDP_TUNNEL_TYPE_VXLAN) {
 		netdev_info(netdev, "udp_tnl: port:%d, sa_family: %d, type: %d not offloaded",
 			    ntohs(ti->port), ti->sa_family, ti->type);
 		goto unlock;
@@ -271,22 +283,37 @@ static netdev_features_t enic_features_check(struct sk_buff *skb,
 	struct enic *enic = netdev_priv(dev);
 	struct udphdr *udph;
 	u16 port = 0;
-	u16 proto;
+	u8 proto;
 
 	if (!skb->encapsulation)
 		return features;
 
 	features = vxlan_features_check(skb, features);
 
-	/* hardware only supports IPv4 vxlan tunnel */
-	if (vlan_get_protocol(skb) != htons(ETH_P_IP))
+	switch (vlan_get_protocol(skb)) {
+	case htons(ETH_P_IPV6):
+		if (!(enic->vxlan.flags & ENIC_VXLAN_OUTER_IPV6))
+			goto out;
+		proto = ipv6_hdr(skb)->nexthdr;
+		break;
+	case htons(ETH_P_IP):
+		proto = ip_hdr(skb)->protocol;
+		break;
+	default:
 		goto out;
+	}
 
-	/* hardware does not support offload of ipv6 inner pkt */
-	if (eth->h_proto != ntohs(ETH_P_IP))
+	switch (eth->h_proto) {
+	case ntohs(ETH_P_IPV6):
+		if (!(enic->vxlan.flags & ENIC_VXLAN_INNER_IPV6))
+			goto out;
+		/* Fall through */
+	case ntohs(ETH_P_IP):
+		break;
+	default:
 		goto out;
+	}
 
-	proto = ip_hdr(skb)->protocol;
 
 	if (proto == IPPROTO_UDP) {
 		udph = udp_hdr(skb);
@@ -635,12 +662,25 @@ static int enic_queue_wq_skb_csum_l4(struct enic *enic, struct vnic_wq *wq,
 
 static void enic_preload_tcp_csum_encap(struct sk_buff *skb)
 {
-	if (skb->protocol == cpu_to_be16(ETH_P_IP)) {
+	const struct ethhdr *eth = (struct ethhdr *)skb_inner_mac_header(skb);
+
+	switch (eth->h_proto) {
+	case ntohs(ETH_P_IP):
 		inner_ip_hdr(skb)->check = 0;
 		inner_tcp_hdr(skb)->check =
 			~csum_tcpudp_magic(inner_ip_hdr(skb)->saddr,
 					   inner_ip_hdr(skb)->daddr, 0,
 					   IPPROTO_TCP, 0);
+		break;
+	case ntohs(ETH_P_IPV6):
+		inner_tcp_hdr(skb)->check =
+			~csum_ipv6_magic(&inner_ipv6_hdr(skb)->saddr,
+					 &inner_ipv6_hdr(skb)->daddr, 0,
+					 IPPROTO_TCP, 0);
+		break;
+	default:
+		WARN_ONCE(1, "Non ipv4/ipv6 inner pkt for encap offload");
+		break;
 	}
 }
 
@@ -857,7 +897,7 @@ static netdev_tx_t enic_hard_start_xmit(struct sk_buff *skb,
 	if (vnic_wq_desc_avail(wq) < MAX_SKB_FRAGS + ENIC_DESC_MAX_SPLITS)
 		netif_tx_stop_queue(txq);
 	skb_tx_timestamp(skb);
-	if (!skb->xmit_more || netif_xmit_stopped(txq))
+	if (!netdev_xmit_more() || netif_xmit_stopped(txq))
 		vnic_wq_doorbell(wq);
 
 	spin_unlock(&enic->wq_lock[txq_map]);
@@ -1394,7 +1434,8 @@ static void enic_rq_indicate_buf(struct vnic_rq *rq,
 		 * csum is correct or is zero.
 		 */
 		if ((netdev->features & NETIF_F_RXCSUM) && !csum_not_calc &&
-		    tcp_udp_csum_ok && ipv4_csum_ok && outer_csum_ok) {
+		    tcp_udp_csum_ok && outer_csum_ok &&
+		    (ipv4_csum_ok || ipv6)) {
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 			skb->csum_level = encap;
 		}
@@ -1880,7 +1921,7 @@ static int enic_open(struct net_device *netdev)
 {
 	struct enic *enic = netdev_priv(netdev);
 	unsigned int i;
-	int err;
+	int err, ret;
 
 	err = enic_request_intr(enic);
 	if (err) {
@@ -1931,16 +1972,15 @@ static int enic_open(struct net_device *netdev)
 		vnic_intr_unmask(&enic->intr[i]);
 
 	enic_notify_timer_start(enic);
-	enic_rfs_flw_tbl_init(enic);
+	enic_rfs_timer_start(enic);
 
 	return 0;
 
 err_out_free_rq:
 	for (i = 0; i < enic->rq_count; i++) {
-		err = vnic_rq_disable(&enic->rq[i]);
-		if (err)
-			return err;
-		vnic_rq_clean(&enic->rq[i], enic_free_rq_buf);
+		ret = vnic_rq_disable(&enic->rq[i]);
+		if (!ret)
+			vnic_rq_clean(&enic->rq[i], enic_free_rq_buf);
 	}
 	enic_dev_notify_unset(enic);
 err_out_free_intr:
@@ -1973,10 +2013,10 @@ static int enic_stop(struct net_device *netdev)
 		napi_disable(&enic->napi[i]);
 
 	netif_carrier_off(netdev);
-	netif_tx_disable(netdev);
 	if (vnic_dev_get_intr_mode(enic->vdev) == VNIC_DEV_INTR_MODE_MSIX)
 		for (i = 0; i < enic->wq_count; i++)
 			napi_disable(&enic->napi[enic_cq_wq(enic, i)]);
+	netif_tx_disable(netdev);
 
 	if (!enic_is_dynamic(enic) && !enic_is_sriov_vf(enic))
 		enic_dev_del_station_addr(enic);
@@ -2008,28 +2048,42 @@ static int enic_stop(struct net_device *netdev)
 	return 0;
 }
 
+static int _enic_change_mtu(struct net_device *netdev, int new_mtu)
+{
+	bool running = netif_running(netdev);
+	int err = 0;
+
+	ASSERT_RTNL();
+	if (running) {
+		err = enic_stop(netdev);
+		if (err)
+			return err;
+	}
+
+	netdev->mtu = new_mtu;
+
+	if (running) {
+		err = enic_open(netdev);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
 static int enic_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct enic *enic = netdev_priv(netdev);
-	int running = netif_running(netdev);
 
 	if (enic_is_dynamic(enic) || enic_is_sriov_vf(enic))
 		return -EOPNOTSUPP;
 
-	if (running)
-		enic_stop(netdev);
-
-	netdev->mtu = new_mtu;
-
 	if (netdev->mtu > enic->port_mtu)
 		netdev_warn(netdev,
-			"interface MTU (%d) set higher than port MTU (%d)\n",
-			netdev->mtu, enic->port_mtu);
+			    "interface MTU (%d) set higher than port MTU (%d)\n",
+			    netdev->mtu, enic->port_mtu);
 
-	if (running)
-		enic_open(netdev);
-
-	return 0;
+	return _enic_change_mtu(netdev, new_mtu);
 }
 
 static void enic_change_mtu_work(struct work_struct *work)
@@ -2037,47 +2091,9 @@ static void enic_change_mtu_work(struct work_struct *work)
 	struct enic *enic = container_of(work, struct enic, change_mtu_work);
 	struct net_device *netdev = enic->netdev;
 	int new_mtu = vnic_dev_mtu(enic->vdev);
-	int err;
-	unsigned int i;
-
-	new_mtu = max_t(int, ENIC_MIN_MTU, min_t(int, ENIC_MAX_MTU, new_mtu));
 
 	rtnl_lock();
-
-	/* Stop RQ */
-	del_timer_sync(&enic->notify_timer);
-
-	for (i = 0; i < enic->rq_count; i++)
-		napi_disable(&enic->napi[i]);
-
-	vnic_intr_mask(&enic->intr[0]);
-	enic_synchronize_irqs(enic);
-	err = vnic_rq_disable(&enic->rq[0]);
-	if (err) {
-		rtnl_unlock();
-		netdev_err(netdev, "Unable to disable RQ.\n");
-		return;
-	}
-	vnic_rq_clean(&enic->rq[0], enic_free_rq_buf);
-	vnic_cq_clean(&enic->cq[0]);
-	vnic_intr_clean(&enic->intr[0]);
-
-	/* Fill RQ with new_mtu-sized buffers */
-	netdev->mtu = new_mtu;
-	vnic_rq_fill(&enic->rq[0], enic_rq_alloc_buf);
-	/* Need at least one buffer on ring to get going */
-	if (vnic_rq_desc_used(&enic->rq[0]) == 0) {
-		rtnl_unlock();
-		netdev_err(netdev, "Unable to alloc receive buffers.\n");
-		return;
-	}
-
-	/* Start RQ */
-	vnic_rq_enable(&enic->rq[0]);
-	napi_enable(&enic->napi[0]);
-	vnic_intr_unmask(&enic->intr[0]);
-	enic_notify_timer_start(enic);
-
+	(void)_enic_change_mtu(netdev, new_mtu);
 	rtnl_unlock();
 
 	netdev_info(netdev, "interface MTU set as %d\n", netdev->mtu);
@@ -2126,8 +2142,6 @@ static int enic_dev_wait(struct vnic_dev *vdev,
 	int done;
 	int err;
 
-	BUG_ON(in_interrupt());
-
 	err = start(vdev, arg);
 	if (err)
 		return err;
@@ -2155,9 +2169,10 @@ static int enic_dev_wait(struct vnic_dev *vdev,
 static int enic_dev_open(struct enic *enic)
 {
 	int err;
+	u32 flags = CMD_OPENF_IG_DESCCACHE;
 
 	err = enic_dev_wait(enic->vdev, vnic_dev_open,
-		vnic_dev_open_done, 0);
+		vnic_dev_open_done, flags);
 	if (err)
 		dev_err(enic_get_dev(enic), "vNIC device open failed, err %d\n",
 			err);
@@ -2279,13 +2294,23 @@ static int enic_set_rss_nic_cfg(struct enic *enic)
 {
 	struct device *dev = enic_get_dev(enic);
 	const u8 rss_default_cpu = 0;
-	const u8 rss_hash_type = NIC_CFG_RSS_HASH_TYPE_IPV4 |
-		NIC_CFG_RSS_HASH_TYPE_TCP_IPV4 |
-		NIC_CFG_RSS_HASH_TYPE_IPV6 |
-		NIC_CFG_RSS_HASH_TYPE_TCP_IPV6;
 	const u8 rss_hash_bits = 7;
 	const u8 rss_base_cpu = 0;
+	u8 rss_hash_type;
+	int res;
 	u8 rss_enable = ENIC_SETTING(enic, RSS) && (enic->rq_count > 1);
+
+	spin_lock_bh(&enic->devcmd_lock);
+	res = vnic_dev_capable_rss_hash_type(enic->vdev, &rss_hash_type);
+	spin_unlock_bh(&enic->devcmd_lock);
+	if (res) {
+		/* defaults for old adapters
+		 */
+		rss_hash_type = NIC_CFG_RSS_HASH_TYPE_IPV4	|
+				NIC_CFG_RSS_HASH_TYPE_TCP_IPV4	|
+				NIC_CFG_RSS_HASH_TYPE_IPV6	|
+				NIC_CFG_RSS_HASH_TYPE_TCP_IPV6;
+	}
 
 	if (rss_enable) {
 		if (!enic_set_rsskey(enic)) {
@@ -2304,6 +2329,13 @@ static int enic_set_rss_nic_cfg(struct enic *enic)
 		rss_hash_bits, rss_base_cpu, rss_enable);
 }
 
+static void enic_set_api_busy(struct enic *enic, bool busy)
+{
+	spin_lock(&enic->enic_api_lock);
+	enic->enic_api_busy = busy;
+	spin_unlock(&enic->enic_api_lock);
+}
+
 static void enic_reset(struct work_struct *work)
 {
 	struct enic *enic = container_of(work, struct enic, reset);
@@ -2313,7 +2345,9 @@ static void enic_reset(struct work_struct *work)
 
 	rtnl_lock();
 
-	spin_lock(&enic->enic_api_lock);
+	/* Stop any activity from infiniband */
+	enic_set_api_busy(enic, true);
+
 	enic_stop(enic->netdev);
 	enic_dev_soft_reset(enic);
 	enic_reset_addr_lists(enic);
@@ -2321,7 +2355,10 @@ static void enic_reset(struct work_struct *work)
 	enic_set_rss_nic_cfg(enic);
 	enic_dev_set_ig_vlan_rewrite_mode(enic);
 	enic_open(enic->netdev);
-	spin_unlock(&enic->enic_api_lock);
+
+	/* Allow infiniband to fiddle with the device again */
+	enic_set_api_busy(enic, false);
+
 	call_netdevice_notifiers(NETDEV_REBOOT, enic->netdev);
 
 	rtnl_unlock();
@@ -2333,7 +2370,9 @@ static void enic_tx_hang_reset(struct work_struct *work)
 
 	rtnl_lock();
 
-	spin_lock(&enic->enic_api_lock);
+	/* Stop any activity from infiniband */
+	enic_set_api_busy(enic, true);
+
 	enic_dev_hang_notify(enic);
 	enic_stop(enic->netdev);
 	enic_dev_hang_reset(enic);
@@ -2342,7 +2381,10 @@ static void enic_tx_hang_reset(struct work_struct *work)
 	enic_set_rss_nic_cfg(enic);
 	enic_dev_set_ig_vlan_rewrite_mode(enic);
 	enic_open(enic->netdev);
-	spin_unlock(&enic->enic_api_lock);
+
+	/* Allow infiniband to fiddle with the device again */
+	enic_set_api_busy(enic, false);
+
 	call_netdevice_notifiers(NETDEV_REBOOT, enic->netdev);
 
 	rtnl_unlock();
@@ -2853,6 +2895,7 @@ static int enic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	timer_setup(&enic->notify_timer, enic_notify_timer, 0);
 
+	enic_rfs_flw_tbl_init(enic);
 	enic_set_rx_coal_setting(enic);
 	INIT_WORK(&enic->reset, enic_reset);
 	INIT_WORK(&enic->tx_hang_reset, enic_tx_hang_reset);
@@ -2865,7 +2908,6 @@ static int enic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 */
 
 	enic->port_mtu = enic->config.mtu;
-	(void)enic_change_mtu(netdev, enic->port_mtu);
 
 	err = enic_set_mac_addr(netdev, enic->mac_addr);
 	if (err) {
@@ -2905,9 +2947,11 @@ static int enic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		netdev->hw_features |= NETIF_F_RXCSUM;
 	if (ENIC_SETTING(enic, VXLAN)) {
 		u64 patch_level;
+		u64 a1 = 0;
 
 		netdev->hw_enc_features |= NETIF_F_RXCSUM		|
 					   NETIF_F_TSO			|
+					   NETIF_F_TSO6			|
 					   NETIF_F_TSO_ECN		|
 					   NETIF_F_GSO_UDP_TUNNEL	|
 					   NETIF_F_HW_CSUM		|
@@ -2926,9 +2970,10 @@ static int enic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		 */
 		err = vnic_dev_get_supported_feature_ver(enic->vdev,
 							 VIC_FEATURE_VXLAN,
-							 &patch_level);
+							 &patch_level, &a1);
 		if (err)
 			patch_level = 0;
+		enic->vxlan.flags = (u8)a1;
 		/* mask bits that are supported by driver
 		 */
 		patch_level &= BIT_ULL(0) | BIT_ULL(2);
@@ -2952,6 +2997,7 @@ static int enic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* MTU range: 68 - 9000 */
 	netdev->min_mtu = ENIC_MIN_MTU;
 	netdev->max_mtu = ENIC_MAX_MTU;
+	netdev->mtu	= enic->port_mtu;
 
 	err = register_netdev(netdev);
 	if (err) {

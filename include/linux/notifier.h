@@ -7,7 +7,7 @@
  *
  *				Alan Cox <Alan.Cox@linux.org>
  */
-
+ 
 #ifndef _LINUX_NOTIFIER_H
 #define _LINUX_NOTIFIER_H
 #include <linux/errno.h>
@@ -122,8 +122,7 @@ extern void srcu_init_notifier_head(struct srcu_notifier_head *nh);
 
 #ifdef CONFIG_TREE_SRCU
 #define _SRCU_NOTIFIER_HEAD(name, mod)				\
-	static DEFINE_PER_CPU(struct srcu_data,			\
-			name##_head_srcu_data);			\
+	static DEFINE_PER_CPU(struct srcu_data, name##_head_srcu_data); \
 	mod struct srcu_notifier_head name =			\
 			SRCU_NOTIFIER_INIT(name, name##_head_srcu_data)
 
@@ -135,7 +134,7 @@ extern void srcu_init_notifier_head(struct srcu_notifier_head *nh);
 #endif
 
 #define SRCU_NOTIFIER_HEAD(name)				\
-	_SRCU_NOTIFIER_HEAD(name, )
+	_SRCU_NOTIFIER_HEAD(name, /* not static */)
 
 #define SRCU_NOTIFIER_HEAD_STATIC(name)				\
 	_SRCU_NOTIFIER_HEAD(name, static)
@@ -209,12 +208,12 @@ static inline int notifier_to_errno(int ret)
 
 /*
  *	Declared notifiers so far. I can imagine quite a few more chains
- *	over time (eg laptop power reset chains, reboot chain (to clean
+ *	over time (eg laptop power reset chains, reboot chain (to clean 
  *	device units up), device [un]mount chain, module load/unload chain,
- *	low memory chain, screenblank chain (for plug in modular screenblankers)
+ *	low memory chain, screenblank chain (for plug in modular screenblankers) 
  *	VC switch chains (for loadable kernel svgalib VC switch helpers) etc...
  */
-
+ 
 /* CPU notfiers are defined in include/linux/cpu.h. */
 
 /* netdevice notifiers are defined in include/linux/netdevice.h */

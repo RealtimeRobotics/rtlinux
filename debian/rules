@@ -1,50 +1,15 @@
 #!/usr/bin/make -f
-# See debhelper(7) (uncomment to enable)
-# output every command that modifies files on the build system.
-export DH_VERBOSE = 1
 
-include /usr/share/dpkg/default.mk
-export DEB_DISTRIBUTION
-export DEB_SOURCE
-export DEB_VERSION
-export DEB_VERSION_EPOCH_UPSTREAM
-export DEB_VERSION_UPSTREAM
-export DEB_VERSION_UPSTREAM_REVISION
+srctree ?= .
 
-# see FEATURE AREAS in dpkg-buildflags(1)
-#export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+build:
+	$(MAKE) KERNELRELEASE=5.4.84-rt47 ARCH=x86 	KBUILD_BUILD_VERSION=1 -f $(srctree)/Makefile
 
-# see ENVIRONMENT in dpkg-buildflags(1)
-# package maintainers to append CFLAGS
-#export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
-# package maintainers to append LDFLAGS
-#export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+binary-arch:
+	$(MAKE) KERNELRELEASE=5.4.84-rt47 ARCH=x86 	KBUILD_BUILD_VERSION=1 -f $(srctree)/Makefile intdeb-pkg
 
-%:
-	env | sort
-	dh $@ -v --parallel
+clean:
+	rm -rf debian/*tmp debian/files
+	$(MAKE) clean
 
-override_dh_clean:
-	@echo noop $@
-
-override_dh_auto_clean:
-	@echo noop $@
-
-override_dh_test:
-	@echo noop $@
-
-override_dh_build:
-	$(MAKE)
-
-override_dh_auto_install:
-	@echo noop $@
-
-override_dh_install:
-	@echo noop $@
-
-override_dh_builddeb:
-	$(MAKE) \
-		KDEB_SOURCENAME=$(DEB_SOURCE) \
-		KDEB_PKGVERSION=$(DEB_VERSION) \
-		KDEB_CHANGELOG_DIST=$(DEB_DISTRIBUTION) \
-		bindeb-pkg
+binary: binary-arch

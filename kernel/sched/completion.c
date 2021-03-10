@@ -11,10 +11,7 @@
  * typically be used for exclusion which gives rise to priority inversion.
  * Waiting for completion is a typically sync point, but not an exclusion point.
  */
-
-#include <linux/sched/signal.h>
-#include <linux/sched/debug.h>
-#include <linux/completion.h>
+#include "sched.h"
 
 /**
  * complete: - signals a single thread waiting on this completion
@@ -25,8 +22,8 @@
  *
  * See also complete_all(), wait_for_completion() and related routines.
  *
- * It may be assumed that this function implies a write memory barrier before
- * changing the task state if and only if any tasks are woken up.
+ * If this function wakes up a task, it executes a full memory barrier before
+ * accessing the task state.
  */
 void complete(struct completion *x)
 {
@@ -47,8 +44,8 @@ EXPORT_SYMBOL(complete);
  *
  * This will wake up all threads waiting on this particular completion event.
  *
- * It may be assumed that this function implies a write memory barrier before
- * changing the task state if and only if any tasks are woken up.
+ * If this function wakes up a task, it executes a full memory barrier before
+ * accessing the task state.
  *
  * Since complete_all() sets the completion of @x permanently to done
  * to allow multiple waiters to finish, a call to reinit_completion()
@@ -75,12 +72,12 @@ do_wait_for_common(struct completion *x,
 	if (!x->done) {
 		DECLARE_SWAITQUEUE(wait);
 
-		__prepare_to_swait(&x->wait, &wait);
 		do {
 			if (signal_pending_state(state, current)) {
 				timeout = -ERESTARTSYS;
 				break;
 			}
+			__prepare_to_swait(&x->wait, &wait);
 			__set_current_state(state);
 			raw_spin_unlock_irq(&x->wait.lock);
 			timeout = action(timeout);
@@ -283,7 +280,7 @@ EXPORT_SYMBOL(wait_for_completion_killable_timeout);
 bool try_wait_for_completion(struct completion *x)
 {
 	unsigned long flags;
-	int ret = 1;
+	bool ret = true;
 
 	/*
 	 * Since x->done will need to be locked only
@@ -292,11 +289,11 @@ bool try_wait_for_completion(struct completion *x)
 	 * return early in the blocking case.
 	 */
 	if (!READ_ONCE(x->done))
-		return 0;
+		return false;
 
 	raw_spin_lock_irqsave(&x->wait.lock, flags);
 	if (!x->done)
-		ret = 0;
+		ret = false;
 	else if (x->done != UINT_MAX)
 		x->done--;
 	raw_spin_unlock_irqrestore(&x->wait.lock, flags);

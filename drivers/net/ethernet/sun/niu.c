@@ -1217,33 +1217,15 @@ static int link_status_1g_rgmii(struct niu *np, int *link_up_p)
 
 	spin_lock_irqsave(&np->lock, flags);
 
-	err = -EINVAL;
-
 	err = mii_read(np, np->phy_addr, MII_BMSR);
 	if (err < 0)
 		goto out;
 
 	bmsr = err;
 	if (bmsr & BMSR_LSTATUS) {
-		u16 adv, lpa;
-
-		err = mii_read(np, np->phy_addr, MII_ADVERTISE);
-		if (err < 0)
-			goto out;
-		adv = err;
-
-		err = mii_read(np, np->phy_addr, MII_LPA);
-		if (err < 0)
-			goto out;
-		lpa = err;
-
-		err = mii_read(np, np->phy_addr, MII_ESTATUS);
-		if (err < 0)
-			goto out;
 		link_up = 1;
 		current_speed = SPEED_1000;
 		current_duplex = DUPLEX_FULL;
-
 	}
 	lp->active_speed = current_speed;
 	lp->active_duplex = current_duplex;
@@ -6713,7 +6695,7 @@ static netdev_tx_t niu_start_xmit(struct sk_buff *skb,
 
 		len = skb_frag_size(frag);
 		mapping = np->ops->map_page(np->device, skb_frag_page(frag),
-					    frag->page_offset, len,
+					    skb_frag_off(frag), len,
 					    DMA_TO_DEVICE);
 
 		rp->tx_buffs[prod].skb = NULL;
@@ -7480,6 +7462,7 @@ static int niu_add_ethtool_tcam_entry(struct niu *np,
 					class = CLASS_CODE_USER_PROG4;
 					break;
 				default:
+					class = CLASS_CODE_UNRECOG;
 					break;
 				}
 				ret = tcam_user_ip_class_set(np, class, 0,
@@ -8116,6 +8099,8 @@ static int niu_pci_vpd_scan_props(struct niu *np, u32 start, u32 end)
 		start += 3;
 
 		prop_len = niu_pci_eeprom_read(np, start + 4);
+		if (prop_len < 0)
+			return prop_len;
 		err = niu_pci_vpd_get_propname(np, start + 5, namebuf, 64);
 		if (err < 0)
 			return err;
@@ -8160,8 +8145,12 @@ static int niu_pci_vpd_scan_props(struct niu *np, u32 start, u32 end)
 			netif_printk(np, probe, KERN_DEBUG, np->dev,
 				     "VPD_SCAN: Reading in property [%s] len[%d]\n",
 				     namebuf, prop_len);
-			for (i = 0; i < prop_len; i++)
-				*prop_buf++ = niu_pci_eeprom_read(np, off + i);
+			for (i = 0; i < prop_len; i++) {
+				err = niu_pci_eeprom_read(np, off + i);
+				if (err >= 0)
+					*prop_buf = err;
+				++prop_buf;
+			}
 		}
 
 		start += len;
@@ -9436,11 +9425,11 @@ static ssize_t show_num_ports(struct device *dev,
 }
 
 static struct device_attribute niu_parent_attributes[] = {
-	__ATTR(port_phy, S_IRUGO, show_port_phy, NULL),
-	__ATTR(plat_type, S_IRUGO, show_plat_type, NULL),
-	__ATTR(rxchan_per_port, S_IRUGO, show_rxchan_per_port, NULL),
-	__ATTR(txchan_per_port, S_IRUGO, show_txchan_per_port, NULL),
-	__ATTR(num_ports, S_IRUGO, show_num_ports, NULL),
+	__ATTR(port_phy, 0444, show_port_phy, NULL),
+	__ATTR(plat_type, 0444, show_plat_type, NULL),
+	__ATTR(rxchan_per_port, 0444, show_rxchan_per_port, NULL),
+	__ATTR(txchan_per_port, 0444, show_txchan_per_port, NULL),
+	__ATTR(num_ports, 0444, show_num_ports, NULL),
 	{}
 };
 

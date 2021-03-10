@@ -15,9 +15,20 @@
 #include <linux/typecheck.h>
 #include <asm/irqflags.h>
 
-#ifdef CONFIG_TRACE_IRQFLAGS
+/* Currently trace_softirqs_on/off is used only by lockdep */
+#ifdef CONFIG_PROVE_LOCKING
   extern void trace_softirqs_on(unsigned long ip);
   extern void trace_softirqs_off(unsigned long ip);
+  extern void lockdep_hardirqs_on(unsigned long ip);
+  extern void lockdep_hardirqs_off(unsigned long ip);
+#else
+  static inline void trace_softirqs_on(unsigned long ip) { }
+  static inline void trace_softirqs_off(unsigned long ip) { }
+  static inline void lockdep_hardirqs_on(unsigned long ip) { }
+  static inline void lockdep_hardirqs_off(unsigned long ip) { }
+#endif
+
+#ifdef CONFIG_TRACE_IRQFLAGS
   extern void trace_hardirqs_on(void);
   extern void trace_hardirqs_off(void);
 # define trace_hardirq_context(p)	((p)->hardirq_context)
@@ -35,8 +46,6 @@ do {						\
 #else
 # define trace_hardirqs_on()		do { } while (0)
 # define trace_hardirqs_off()		do { } while (0)
-# define trace_softirqs_on(ip)		do { } while (0)
-# define trace_softirqs_off(ip)		do { } while (0)
 # define trace_hardirq_context(p)	0
 # define trace_softirq_context(p)	0
 # define trace_hardirqs_enabled(p)	0
@@ -47,7 +56,7 @@ do {						\
 # define lockdep_softirq_exit()		do { } while (0)
 #endif
 
-#if defined(CONFIG_TRACE_IRQFLAGS) && !defined(CONFIG_PREEMPT_RT_FULL)
+#if defined(CONFIG_TRACE_IRQFLAGS) && !defined(CONFIG_PREEMPT_RT)
 # define lockdep_softirq_enter()		\
 do {						\
 	current->softirq_context++;		\

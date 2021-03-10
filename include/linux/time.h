@@ -10,13 +10,13 @@
 extern struct timezone sys_tz;
 
 int get_timespec64(struct timespec64 *ts,
-		const struct timespec __user *uts);
+		const struct __kernel_timespec __user *uts);
 int put_timespec64(const struct timespec64 *ts,
-		struct timespec __user *uts);
+		struct __kernel_timespec __user *uts);
 int get_itimerspec64(struct itimerspec64 *it,
-			const struct itimerspec __user *uit);
+			const struct __kernel_itimerspec __user *uit);
 int put_itimerspec64(const struct itimerspec64 *it,
-			struct itimerspec __user *uit);
+			struct __kernel_itimerspec __user *uit);
 
 extern time64_t mktime64(const unsigned int year, const unsigned int mon,
 			const unsigned int day, const unsigned int hour,
@@ -96,4 +96,17 @@ static inline bool itimerspec64_valid(const struct itimerspec64 *its)
  */
 #define time_after32(a, b)	((s32)((u32)(b) - (u32)(a)) < 0)
 #define time_before32(b, a)	time_after32(a, b)
+
+/**
+ * time_between32 - check if a 32-bit timestamp is within a given time range
+ * @t:	the time which may be within [l,h]
+ * @l:	the lower bound of the range
+ * @h:	the higher bound of the range
+ *
+ * time_before32(t, l, h) returns true if @l <= @t <= @h. All operands are
+ * treated as 32-bit integers.
+ *
+ * Equivalent to !(time_before32(@t, @l) || time_after32(@t, @h)).
+ */
+#define time_between32(t, l, h) ((u32)(h) - (u32)(l) >= (u32)(t) - (u32)(l))
 #endif

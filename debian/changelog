@@ -1,36 +1,5 @@
-linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu3) bionic; urgency=medium
-
-  * ed debian/rules: KDEB_CHANGELOG_DIST=$(DEB_DISTRIBUTION)
-    to silence warning during build
-  * add debian/patches
-
- -- Neil Roza <neil@rtr.ai>  Thu, 11 Mar 2021 15:06:16 +0000
-
-linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu2) bionic; urgency=medium
-
-  * add debian/patches
-  * ed debian/control: Build-Depends: +bison, +flex
-  * ed debian/control: Build-Depends: +openssl
-
- -- Neil Roza <neil@rtr.ai>  Tue, 09 Mar 2021 23:50:35 +0000
-
-linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu1) bionic; urgency=medium
-
-  * add debian/gbp.conf
-  * ed debian/control: Build-Depends: +libelf-dev
-  * ed debian/control: Build-Depends: +libssl-dev
-  * try debhelper
-  * override_dh_clean: noop
-  * override_dh_auto_clean: noop
-  * add debian/source/format
-  * try this
-  * override_dh_*install: noop
-  * ed debian/rules: rm commented code
-
- -- Neil Roza <neil@rtr.ai>  Thu, 04 Mar 2021 18:12:58 +0000
-
-linux-4.16.18-rt12 (4.16.18-rt12-1) bionic; urgency=low
+linux-5.4.84-rt47 (5.4.84-rt47-1) focal; urgency=low
 
   * Custom built Linux kernel.
 
- -- Neil Roza <neil@rtr.ai>  Thu, 04 Mar 2021 14:44:03 +0000
+ -- Neil Roza <neil@rtr.ai>  Wed, 10 Mar 2021 23:42:08 +0000
