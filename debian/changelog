@@ -1,3 +1,9 @@
+linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu4) focal; urgency=medium
+
+  * quilty
+
+ -- Neil Roza <neil@rtr.ai>  Thu, 11 Mar 2021 23:45:17 +0000
+
 linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu3) focal; urgency=medium
 
   * ed debian/source/format: 3.0 (quilt)
