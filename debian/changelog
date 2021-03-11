@@ -1,3 +1,14 @@
+linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu2) focal; urgency=medium
+
+  * ed debian/rules: try new make vars
+  * override_dh_auto_clean: $(MAKE) clean
+  * override_dh_clean: noop
+  * ed debian/rules: export LC_ALL=C
+  * ed debian/rules: LANG, LANGUAGE
+  * ed debian/rules: lose the ARCH
+
+ -- Neil Roza <neil@rtr.ai>  Thu, 11 Mar 2021 23:06:48 +0000
+
 linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu1) focal; urgency=medium
 
   * use old debian/rules
