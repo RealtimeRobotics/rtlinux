@@ -40,9 +40,7 @@ override_dh_test:
 	@echo NOOP $@
 
 override_dh_build:
-	$(MAKE) \
-		KERNELRELEASE=$(DEB_VERSION_UPSTREAM) \
-		ARCH=$(DEB_TARGET_ARCH)
+	$(MAKE) KERNELRELEASE=$(DEB_VERSION_UPSTREAM)
 
 override_dh_auto_install:
 	@echo NOOP $@
@@ -51,7 +49,4 @@ override_dh_install:
 	@echo NOOP $@
 
 override_dh_builddeb:
-	$(MAKE) \
-		KERNELRELEASE=$(DEB_VERSION_UPSTREAM) \
-		ARCH=$(DEB_TARGET_ARCH) \
-		intdeb-pkg
+	$(MAKE) KERNELRELEASE=$(DEB_VERSION_UPSTREAM) intdeb-pkg
