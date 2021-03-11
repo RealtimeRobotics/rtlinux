@@ -29,8 +29,8 @@ export DEB_TARGET_ARCH
 # override_dh_clean:
 # 	@echo noop $@
 
-# override_dh_auto_clean:
-# 	@echo noop $@
+override_dh_auto_clean:
+	$(MAKE) clean
 
 override_dh_test:
 	@echo noop $@
