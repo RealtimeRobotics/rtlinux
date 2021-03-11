@@ -1,3 +1,9 @@
+linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu3) focal; urgency=medium
+
+  * ed debian/source/format: 3.0 (quilt)
+
+ -- Neil Roza <neil@rtr.ai>  Thu, 11 Mar 2021 23:20:09 +0000
+
 linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu2) focal; urgency=medium
 
   * ed debian/rules: try new make vars
