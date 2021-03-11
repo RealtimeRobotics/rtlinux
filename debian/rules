@@ -11,6 +11,8 @@ export DEB_VERSION_EPOCH_UPSTREAM
 export DEB_VERSION_UPSTREAM
 export DEB_VERSION_UPSTREAM_REVISION
 
+export DEB_TARGET_ARCH
+
 # see FEATURE AREAS in dpkg-buildflags(1)
 #export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
@@ -24,17 +26,19 @@ export DEB_VERSION_UPSTREAM_REVISION
 	env | sort
 	dh $@ -v --parallel
 
-override_dh_clean:
-	@echo noop $@
+# override_dh_clean:
+# 	@echo noop $@
 
-override_dh_auto_clean:
-	@echo noop $@
+# override_dh_auto_clean:
+# 	@echo noop $@
 
 override_dh_test:
 	@echo noop $@
 
 override_dh_build:
-	$(MAKE)
+	$(MAKE) \
+		KERNELRELEASE=$(DEB_VERSION_UPSTREAM) \
+		ARCH=$(DEB_TARGET_ARCH)
 
 override_dh_auto_install:
 	@echo noop $@
@@ -44,7 +48,6 @@ override_dh_install:
 
 override_dh_builddeb:
 	$(MAKE) \
-		KDEB_SOURCENAME=$(DEB_SOURCE) \
-		KDEB_PKGVERSION=$(DEB_VERSION) \
-		KDEB_CHANGELOG_DIST=$(DEB_DISTRIBUTION) \
+		KERNELRELEASE=$(DEB_VERSION_UPSTREAM) \
+		ARCH=$(DEB_TARGET_ARCH) \
 		intdeb-pkg
