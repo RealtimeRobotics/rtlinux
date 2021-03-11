@@ -1,3 +1,13 @@
+linux-5.4.84-rt47 (5.4.84-rt47-1ubuntu1) focal; urgency=medium
+
+  * use old debian/rules
+  * ed debian/control: old Build-Depends, rm dbg
+  * add debian/compat
+  * ed debian/control: Build-Depends: +rsync
+  * ed debian/rules: bindeb-pkg -> intdeb-pkg
+
+ -- Neil Roza <neil@rtr.ai>  Thu, 11 Mar 2021 20:59:58 +0000
+
 linux-5.4.84-rt47 (5.4.84-rt47-1) focal; urgency=low
 
   * Custom built Linux kernel.
