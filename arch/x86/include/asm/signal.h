@@ -32,12 +32,12 @@ typedef struct {
  * Because some traps use the IST stack, we must keep preemption
  * disabled while calling do_trap(), but do_trap() may call
  * force_sig_info() which will grab the signal spin_locks for the
- * task, which in PREEMPT_RT_FULL are mutexes.  By defining
+ * task, which in PREEMPT_RT are mutexes.  By defining
  * ARCH_RT_DELAYS_SIGNAL_SEND the force_sig_info() will set
  * TIF_NOTIFY_RESUME and set up the signal to be sent on exit of the
  * trap.
  */
-#if defined(CONFIG_PREEMPT_RT_FULL)
+#if defined(CONFIG_PREEMPT_RT)
 #define ARCH_RT_DELAYS_SIGNAL_SEND
 #endif
 
@@ -52,6 +52,7 @@ extern void do_signal(struct pt_regs *regs);
 
 #define __ARCH_HAS_SA_RESTORER
 
+#include <asm/asm.h>
 #include <uapi/asm/sigcontext.h>
 
 #ifdef __i386__
@@ -99,9 +100,9 @@ static inline int __const_sigismember(sigset_t *set, int _sig)
 
 static inline int __gen_sigismember(sigset_t *set, int _sig)
 {
-	unsigned char ret;
-	asm("btl %2,%1\n\tsetc %0"
-	    : "=qm"(ret) : "m"(*set), "Ir"(_sig-1) : "cc");
+	bool ret;
+	asm("btl %2,%1" CC_SET(c)
+	    : CC_OUT(c) (ret) : "m"(*set), "Ir"(_sig-1));
 	return ret;
 }
 

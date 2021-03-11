@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright © 2008 Ingo Molnar
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
  */
 
 #include <asm/iomap.h>
@@ -44,6 +31,9 @@ int iomap_create_wc(resource_size_t base, unsigned long size, pgprot_t *prot)
 		return ret;
 
 	*prot = __pgprot(__PAGE_KERNEL | cachemode2protval(pcm));
+	/* Filter out unsupported __PAGE_KERNEL* bits: */
+	pgprot_val(*prot) &= __default_kernel_pte_mask;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(iomap_create_wc);
@@ -68,7 +58,7 @@ void *kmap_atomic_prot_pfn(unsigned long pfn, pgprot_t prot)
 	vaddr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
 	WARN_ON(!pte_none(*(kmap_pte - idx)));
 
-#ifdef CONFIG_PREEMPT_RT_FULL
+#ifdef CONFIG_PREEMPT_RT
 	current->kmap_pte[type] = pte;
 #endif
 	set_pte(kmap_pte - idx, pte);
@@ -93,6 +83,9 @@ iomap_atomic_prot_pfn(unsigned long pfn, pgprot_t prot)
 	if (!pat_enabled() && pgprot2cachemode(prot) != _PAGE_CACHE_MODE_WB)
 		prot = __pgprot(__PAGE_KERNEL |
 				cachemode2protval(_PAGE_CACHE_MODE_UC_MINUS));
+
+	/* Filter out unsupported __PAGE_KERNEL* bits: */
+	pgprot_val(prot) &= __default_kernel_pte_mask;
 
 	return (void __force __iomem *) kmap_atomic_prot_pfn(pfn, prot);
 }
@@ -119,7 +112,7 @@ iounmap_atomic(void __iomem *kvaddr)
 		 * is a bad idea also, in case the page changes cacheability
 		 * attributes or becomes a protected page in a hypervisor.
 		 */
-#ifdef CONFIG_PREEMPT_RT_FULL
+#ifdef CONFIG_PREEMPT_RT
 		current->kmap_pte[type] = __pte(0);
 #endif
 		kpte_clear_flush(kmap_pte-idx, vaddr);

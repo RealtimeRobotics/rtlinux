@@ -39,14 +39,13 @@ SCHED_FEAT(WAKEUP_PREEMPTION, true)
 
 SCHED_FEAT(HRTICK, false)
 SCHED_FEAT(DOUBLE_TICK, false)
-SCHED_FEAT(LB_BIAS, true)
 
 /*
  * Decrement CPU capacity based on time not spent running tasks
  */
 SCHED_FEAT(NONTASK_CAPACITY, true)
 
-#ifdef CONFIG_PREEMPT_RT_FULL
+#ifdef CONFIG_PREEMPT_RT
 SCHED_FEAT(TTWU_QUEUE, false)
 # ifdef CONFIG_PREEMPT_LAZY
 SCHED_FEAT(PREEMPT_LAZY, true)
@@ -93,3 +92,8 @@ SCHED_FEAT(ATTACH_AGE_LOAD, true)
 SCHED_FEAT(WA_IDLE, true)
 SCHED_FEAT(WA_WEIGHT, true)
 SCHED_FEAT(WA_BIAS, true)
+
+/*
+ * UtilEstimation. Use estimated CPU utilization.
+ */
+SCHED_FEAT(UTIL_EST, true)

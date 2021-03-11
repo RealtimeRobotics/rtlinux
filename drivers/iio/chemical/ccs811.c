@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ccs811.c - Support for AMS CCS811 VOC Sensor
  *
  * Copyright (C) 2017 Narcisa Vasile <narcisaanamaria12@gmail.com>
  *
  * Datasheet: ams.com/content/download/951091/2269479/CCS811_DS000459_3-00.pdf
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * IIO driver for AMS CCS811 (I2C address 0x5A/0x5B set by ADDR Low/High)
  *
@@ -32,7 +29,7 @@
 #define CCS811_ALG_RESULT_DATA	0x02
 #define CCS811_RAW_DATA		0x03
 #define CCS811_HW_ID		0x20
-#define CCS881_HW_ID_VALUE	0x81
+#define CCS811_HW_ID_VALUE	0x81
 #define CCS811_HW_VERSION	0x21
 #define CCS811_HW_VERSION_VALUE	0x10
 #define CCS811_HW_VERSION_MASK	0xF0
@@ -69,7 +66,7 @@ struct ccs811_reading {
 	__be16 voc;
 	u8 status;
 	u8 error;
-	__be16 resistance;
+	__be16 raw_data;
 } __attribute__((__packed__));
 
 struct ccs811_data {
@@ -78,6 +75,11 @@ struct ccs811_data {
 	struct ccs811_reading buffer;
 	struct iio_trigger *drdy_trig;
 	bool drdy_trig_on;
+	/* Ensures correct alignment of timestamp if present */
+	struct {
+		s16 channels[2];
+		s64 ts __aligned(8);
+	} scan;
 };
 
 static const struct iio_chan_spec ccs811_channels[] = {
@@ -213,12 +215,12 @@ static int ccs811_read_raw(struct iio_dev *indio_dev,
 
 		switch (chan->type) {
 		case IIO_VOLTAGE:
-			*val = be16_to_cpu(data->buffer.resistance) &
+			*val = be16_to_cpu(data->buffer.raw_data) &
 					   CCS811_VOLTAGE_MASK;
 			ret = IIO_VAL_INT;
 			break;
 		case IIO_CURRENT:
-			*val = be16_to_cpu(data->buffer.resistance) >> 10;
+			*val = be16_to_cpu(data->buffer.raw_data) >> 10;
 			ret = IIO_VAL_INT;
 			break;
 		case IIO_CONCENTRATION:
@@ -309,17 +311,17 @@ static irqreturn_t ccs811_trigger_handler(int irq, void *p)
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct ccs811_data *data = iio_priv(indio_dev);
 	struct i2c_client *client = data->client;
-	s16 buf[8]; /* s16 eCO2 + s16 TVOC + padding + 8 byte timestamp */
 	int ret;
 
-	ret = i2c_smbus_read_i2c_block_data(client, CCS811_ALG_RESULT_DATA, 4,
-					    (u8 *)&buf);
+	ret = i2c_smbus_read_i2c_block_data(client, CCS811_ALG_RESULT_DATA,
+					    sizeof(data->scan.channels),
+					    (u8 *)data->scan.channels);
 	if (ret != 4) {
 		dev_err(&client->dev, "cannot read sensor data\n");
 		goto err;
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buf,
+	iio_push_to_buffers_with_timestamp(indio_dev, &data->scan,
 					   iio_get_time_ns(indio_dev));
 
 err:
@@ -356,7 +358,7 @@ static int ccs811_probe(struct i2c_client *client,
 	if (ret < 0)
 		return ret;
 
-	if (ret != CCS881_HW_ID_VALUE) {
+	if (ret != CCS811_HW_ID_VALUE) {
 		dev_err(&client->dev, "hardware id doesn't match CCS81x\n");
 		return -ENODEV;
 	}

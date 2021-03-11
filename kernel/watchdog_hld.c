@@ -24,14 +24,12 @@ static DEFINE_PER_CPU(bool, hard_watchdog_warn);
 static DEFINE_PER_CPU(bool, watchdog_nmi_touch);
 static DEFINE_PER_CPU(struct perf_event *, watchdog_ev);
 static DEFINE_PER_CPU(struct perf_event *, dead_event);
-static DEFINE_RAW_SPINLOCK(watchdog_output_lock);
-
 static struct cpumask dead_events_mask;
 
 static unsigned long hardlockup_allcpu_dumped;
 static atomic_t watchdog_cpus = ATOMIC_INIT(0);
 
-void arch_touch_nmi_watchdog(void)
+notrace void arch_touch_nmi_watchdog(void)
 {
 	/*
 	 * Using __raw here because some code paths have
@@ -136,15 +134,9 @@ static void watchdog_overflow_callback(struct perf_event *event,
 		/* only print hardlockups once */
 		if (__this_cpu_read(hard_watchdog_warn) == true)
 			return;
-		/*
-		 * If early-printk is enabled then make sure we do not
-		 * lock up in printk() and kill console logging:
-		 */
-		printk_kill();
 
-		raw_spin_lock(&watchdog_output_lock);
-
-		pr_emerg("Watchdog detected hard LOCKUP on cpu %d", this_cpu);
+		pr_emerg("Watchdog detected hard LOCKUP on cpu %d\n",
+			 this_cpu);
 		print_modules();
 		print_irqtrace_events(current);
 		if (regs)
@@ -160,7 +152,6 @@ static void watchdog_overflow_callback(struct perf_event *event,
 				!test_and_set_bit(0, &hardlockup_allcpu_dumped))
 			trigger_allbutself_cpu_backtrace();
 
-		raw_spin_unlock(&watchdog_output_lock);
 		if (hardlockup_panic)
 			nmi_panic(regs, "Hard LOCKUP");
 
@@ -185,8 +176,8 @@ static int hardlockup_detector_event_create(void)
 	evt = perf_event_create_kernel_counter(wd_attr, cpu, NULL,
 					       watchdog_overflow_callback, NULL);
 	if (IS_ERR(evt)) {
-		pr_info("Perf event create on CPU %d failed with %ld\n", cpu,
-			PTR_ERR(evt));
+		pr_debug("Perf event create on CPU %d failed with %ld\n", cpu,
+			 PTR_ERR(evt));
 		return PTR_ERR(evt);
 	}
 	this_cpu_write(watchdog_ev, evt);
