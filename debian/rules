@@ -3,6 +3,8 @@
 # output every command that modifies files on the build system.
 export DH_VERBOSE = 1
 
+export LANG = C
+export LANGUAGE = C
 export LC_ALL = C
 
 include /usr/share/dpkg/default.mk
@@ -32,10 +34,10 @@ override_dh_auto_clean:
 	$(MAKE) clean
 
 override_dh_clean:
-	@echo noop $@
+	@echo NOOP $@
 
 override_dh_test:
-	@echo noop $@
+	@echo NOOP $@
 
 override_dh_build:
 	$(MAKE) \
@@ -43,10 +45,10 @@ override_dh_build:
 		ARCH=$(DEB_TARGET_ARCH)
 
 override_dh_auto_install:
-	@echo noop $@
+	@echo NOOP $@
 
 override_dh_install:
-	@echo noop $@
+	@echo NOOP $@
 
 override_dh_builddeb:
 	$(MAKE) \
