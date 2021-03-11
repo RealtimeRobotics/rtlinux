@@ -47,4 +47,4 @@ override_dh_builddeb:
 		KDEB_SOURCENAME=$(DEB_SOURCE) \
 		KDEB_PKGVERSION=$(DEB_VERSION) \
 		KDEB_CHANGELOG_DIST=$(DEB_DISTRIBUTION) \
-		bindeb-pkg
+		intdeb-pkg
