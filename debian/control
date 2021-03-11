@@ -12,6 +12,7 @@ Build-Depends:
  libelf-dev,
  libssl-dev,
  openssl,
+ rsync,
 Homepage: http://www.kernel.org/
 
 Package: linux-image-5.4.84-rt47
