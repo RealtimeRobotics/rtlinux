@@ -1,3 +1,9 @@
+linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu4) bionic; urgency=medium
+
+  * ed debian/gbp.conf: debian-branch: ubuntu/master -> ubuntu/bionic
+
+ -- Neil Roza <neil@rtr.ai>  Fri, 12 Mar 2021 16:13:29 +0000
+
 linux-4.16.18-rt12 (4.16.18-rt12-1ubuntu3) bionic; urgency=medium
 
   * ed debian/rules: KDEB_CHANGELOG_DIST=$(DEB_DISTRIBUTION)
